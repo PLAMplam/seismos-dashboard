@@ -148,6 +148,16 @@
           </div>
         </div>
       </div>
+      <div class="row">
+        <div style="flex:1">
+          <label>Jump to region</label>
+          <div class="seg" id="region-seg">
+            <button data-lat="13.7" data-lon="100.5" data-zoom="5">THAILAND</button>
+            <button data-lat="4.5" data-lon="108" data-zoom="4">ASEAN</button>
+            <button data-lat="20" data-lon="0" data-zoom="3">WORLD</button>
+          </div>
+        </div>
+      </div>
       <div class="stats">
         <div class="stat"><div class="n" id="stat-total">—</div><div class="l">Events</div></div>
         <div class="stat"><div class="n" id="stat-max">—</div><div class="l">Max Mag</div></div>
@@ -232,13 +242,4 @@ function clearMarkers(){
 function render(){
   clearMarkers();
   const list = document.getElementById('list');
-  const filtered = quakes.filter(q => q.mag >= currentMinMag).sort((a,b)=>b.time-a.time);
-
-  if(filtered.length === 0){
-    list.innerHTML = '<div class="empty">No events match this filter. Try lowering the minimum magnitude.</div>';
-  } else {
-    list.innerHTML = filtered.map((q,i) => `
-      <div class="item" data-idx="${i}">
-        <div class="mag-badge" style="background:${magColor(q.mag)}">${q.mag.toFixed(1)}</div>
-        <div class="item-info">
-          <div class="
+  const filtered = quakes.filter(q => q.mag >= currentMinM
