@@ -116,7 +116,12 @@
       <h1>SEISMOS</h1>
       <span class="tag">Live Earthquake Monitor</span>
     </div>
-    <div class="pulse"><span class="dot"></span><span id="pulse-text">CONNECTING TO USGS FEED</span></div>
+    <div style="display:flex; align-items:center; gap:18px;">
+      <button id="sound-toggle" style="background:var(--ink); border:1px solid var(--line); color:var(--paper-dim); font-family:'Space Mono',monospace; font-size:11px; padding:7px 12px; border-radius:3px; cursor:pointer; letter-spacing:1px; display:flex; align-items:center; gap:6px;">
+        <span id="sound-icon">🔕</span> ALERT SOUND: OFF
+      </button>
+      <div class="pulse"><span class="dot"></span><span id="pulse-text">CONNECTING TO USGS FEED</span></div>
+    </div>
   </header>
 
   <div class="sidebar">
@@ -177,6 +182,30 @@ let markers = [];
 let currentWindow = 'day';
 let currentMinMag = 2.5;
 let quakes = [];
+let soundEnabled = false;
+let seenIds = new Set();
+let firstLoad = true;
+const ALERT_THRESHOLD = 5.0;
+
+function playAlertTone(mag){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beeps = mag >= 6 ? 3 : 2;
+    for(let i = 0; i < beeps; i++){
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = mag >= 6 ? 880 : 660;
+      gain.gain.setValueAtTime(0.001, ctx.currentTime + i * 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + i * 0.35 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.35 + 0.28);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.35);
+      osc.stop(ctx.currentTime + i * 0.35 + 0.3);
+    }
+  }catch(e){ console.error('Audio alert failed', e); }
+}
 
 function magColor(m){
   if(m >= 6) return '#e23f3f';
@@ -212,87 +241,4 @@ function render(){
       <div class="item" data-idx="${i}">
         <div class="mag-badge" style="background:${magColor(q.mag)}">${q.mag.toFixed(1)}</div>
         <div class="item-info">
-          <div class="item-place">${q.place}</div>
-          <div class="item-meta">${timeAgo(q.time)} · depth ${q.depth.toFixed(0)} km</div>
-        </div>
-      </div>
-    `).join('');
-
-    list.querySelectorAll('.item').forEach(el => {
-      el.addEventListener('click', () => {
-        list.querySelectorAll('.item').forEach(x=>x.classList.remove('selected'));
-        el.classList.add('selected');
-        const q = filtered[el.dataset.idx];
-        map.flyTo([q.lat, q.lon], 6, {duration: 0.8});
-      });
-    });
-  }
-
-  filtered.forEach(q => {
-    const marker = L.circleMarker([q.lat, q.lon], {
-      radius: Math.max(4, q.mag * 3),
-      fillColor: magColor(q.mag),
-      color: magColor(q.mag),
-      weight: 1,
-      opacity: 0.6,
-      fillOpacity: 0.45
-    }).addTo(map);
-    marker.bindPopup(`<b>M ${q.mag.toFixed(1)}</b><br>${q.place}<br>${timeAgo(q.time)}<br>depth: ${q.depth.toFixed(0)} km`);
-    markers.push(marker);
-  });
-
-  const total = filtered.length;
-  const maxMag = total ? Math.max(...filtered.map(q=>q.mag)).toFixed(1) : '—';
-  const oneHrAgo = Date.now() - 3600000;
-  const recent = filtered.filter(q => q.time > oneHrAgo).length;
-  document.getElementById('stat-total').textContent = total;
-  document.getElementById('stat-max').textContent = maxMag;
-  document.getElementById('stat-recent').textContent = recent;
-}
-
-async function fetchQuakes(){
-  document.getElementById('pulse-text').textContent = 'SYNCING';
-  const feedName = currentWindow === 'hour' ? 'all_hour' : currentWindow === 'day' ? 'all_day' : currentWindow === 'week' ? 'all_week' : 'all_month';
-  const url = `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feedName}.geojson`;
-  try{
-    const res = await fetch(url);
-    const data = await res.json();
-    quakes = data.features.map(f => ({
-      mag: f.properties.mag ?? 0,
-      place: f.properties.place ?? 'Unknown location',
-      time: f.properties.time,
-      depth: f.geometry.coordinates[2] ?? 0,
-      lon: f.geometry.coordinates[0],
-      lat: f.geometry.coordinates[1]
-    })).filter(q => q.mag !== null);
-    document.getElementById('pulse-text').textContent = 'LIVE — USGS FEED';
-    render();
-  }catch(e){
-    document.getElementById('pulse-text').textContent = 'FEED UNAVAILABLE';
-    document.getElementById('list').innerHTML = '<div class="empty">Could not reach the USGS feed. Check connection and retry.</div>';
-    console.error(e);
-  }
-}
-
-document.getElementById('window-seg').addEventListener('click', (e) => {
-  if(e.target.tagName !== 'BUTTON') return;
-  document.querySelectorAll('#window-seg button').forEach(b=>b.classList.remove('active'));
-  e.target.classList.add('active');
-  currentWindow = e.target.dataset.v;
-  fetchQuakes();
-});
-
-document.getElementById('mag-seg').addEventListener('click', (e) => {
-  if(e.target.tagName !== 'BUTTON') return;
-  document.querySelectorAll('#mag-seg button').forEach(b=>b.classList.remove('active'));
-  e.target.classList.add('active');
-  currentMinMag = parseFloat(e.target.dataset.v);
-  render();
-});
-
-fetchQuakes();
-setInterval(fetchQuakes, 60000);
-</script>
-
-</body>
-</html>
+          <div class="
