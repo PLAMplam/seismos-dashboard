@@ -29,8 +29,8 @@
 
   header{
     grid-column: 1 / -1;
-    display:flex; align-items:baseline; justify-content:space-between;
-    padding:18px 24px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 24px;
     border-bottom:1px solid var(--line);
     background: linear-gradient(180deg, #141d1a, #101613);
   }
@@ -71,7 +71,7 @@
   .seg button.active{background:var(--hot); color:#160b08; font-weight:700;}
   .seg button:hover:not(.active){background:#182420;}
 
-  .stats{display:flex; gap:1px; background:var(--line);}
+  .stats{display:flex; gap:1px; background:var(--line); margin-top:4px;}
   .stat{flex:1; background:var(--panel-2); padding:10px 12px; text-align:center;}
   .stat .n{font-family:'Archivo',sans-serif; font-weight:900; font-size:20px;}
   .stat .l{font-size:9px; color:var(--paper-dim); letter-spacing:1px; text-transform:uppercase; margin-top:2px;}
@@ -103,9 +103,22 @@
     position:absolute; bottom:20px; right:20px; z-index:500;
     background:rgba(15,22,19,0.92); border:1px solid var(--line); border-radius:4px;
     padding:12px 14px; font-size:10px; color:var(--paper-dim);
+    backdrop-filter: blur(4px);
   }
   .legend .row2{display:flex; align-items:center; gap:6px; margin:4px 0;}
   .legend .sw{width:9px; height:9px; border-radius:50%;}
+
+  .custom-popup .leaflet-popup-content-wrapper {
+    background: var(--panel);
+    color: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: 'Space Mono', monospace;
+  }
+  .custom-popup .leaflet-popup-tip {
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
 </style>
 </head>
 <body>
@@ -154,7 +167,7 @@
           <div class="seg" id="region-seg">
             <button data-lat="13.7" data-lon="100.5" data-zoom="5">THAILAND</button>
             <button data-lat="4.5" data-lon="108" data-zoom="4">ASEAN</button>
-            <button data-lat="20" data-lon="0" data-zoom="3">WORLD</button>
+            <button data-lat="20" data-lon="0" data-zoom="2">WORLD</button>
           </div>
         </div>
       </div>
@@ -188,14 +201,32 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 18
 }).addTo(map);
 
-let markers = [];
+let markersMap = new Map();
 let currentWindow = 'day';
 let currentMinMag = 2.5;
 let quakes = [];
 let soundEnabled = false;
 let seenIds = new Set();
 let firstLoad = true;
+let selectedId = null;
 const ALERT_THRESHOLD = 5.0;
+
+const USGS_FEEDS = {
+  hour: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson',
+  day: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
+  week: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson',
+  month: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson'
+};
+
+const soundBtn = document.getElementById('sound-toggle');
+soundBtn.addEventListener('click', () => {
+  soundEnabled = !soundEnabled;
+  document.getElementById('sound-icon').innerText = soundEnabled ? '🔔' : '🔕';
+  soundBtn.childNodes[1].nodeValue = soundEnabled ? ' ALERT SOUND: ON' : ' ALERT SOUND: OFF';
+  soundBtn.style.borderColor = soundEnabled ? 'var(--calm)' : 'var(--line)';
+  soundBtn.style.color = soundEnabled ? 'var(--calm)' : 'var(--paper-dim)';
+  if(soundEnabled) playAlertTone(5.0);
+});
 
 function playAlertTone(mag){
   try{
@@ -235,11 +266,162 @@ function timeAgo(ts){
 }
 
 function clearMarkers(){
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
+  markersMap.forEach(m => map.removeLayer(m));
+  markersMap.clear();
 }
 
 function render(){
   clearMarkers();
   const list = document.getElementById('list');
-  const filtered = quakes.filter(q => q.mag >= currentMinM
+  const filtered = quakes.filter(q => q.mag >= currentMinMag);
+
+  document.getElementById('stat-total').innerText = filtered.length;
+  if(filtered.length > 0){
+    const maxM = Math.max(...filtered.map(q => q.mag));
+    document.getElementById('stat-max').innerText = maxM.toFixed(1);
+    const oneHrAgo = Date.now() - (3600 * 1000);
+    const recentCnt = filtered.filter(q => q.time >= oneHrAgo).length;
+    document.getElementById('stat-recent').innerText = recentCnt;
+  } else {
+    document.getElementById('stat-max').innerText = '—';
+    document.getElementById('stat-recent').innerText = '0';
+  }
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty">No events matching filter constraints.</div>`;
+    return;
+  }
+
+  let html = '';
+  filtered.forEach(q => {
+    const color = magColor(q.mag);
+    const radius = Math.max(4, Math.pow(q.mag, 1.8) * 1.2);
+    
+    const marker = L.circleMarker([q.lat, q.lon], {
+      radius: radius,
+      fillColor: color,
+      color: color,
+      weight: 1,
+      opacity: 0.8,
+      fillOpacity: 0.45
+    }).addTo(map);
+
+    const popupContent = `
+      <div style="font-size:12px; font-weight:700; margin-bottom:4px; color:${color}">MAG ${q.mag.toFixed(1)}</div>
+      <div style="font-size:11px; margin-bottom:6px;">${q.place}</div>
+      <div style="font-size:10px; color:var(--paper-dim)">Depth: ${q.depth} km</div>
+      <div style="font-size:10px; color:var(--paper-dim)">Time: ${new Date(q.time).toLocaleTimeString()}</div>
+    `;
+    marker.bindPopup(popupContent, {className: 'custom-popup'});
+
+    marker.on('click', () => {
+      selectQuake(q.id, false);
+    });
+
+    markersMap.set(q.id, marker);
+
+    const isSelected = q.id === selectedId ? 'selected' : '';
+    html += `
+      <div class="item ${isSelected}" id="item-${q.id}" onclick="selectQuake('${q.id}', true)">
+        <div class="mag-badge" style="background:${color}">${q.mag.toFixed(1)}</div>
+        <div class="item-info">
+          <div class="item-place" title="${q.place}">${q.place}</div>
+          <div class="item-meta">${timeAgo(q.time)} • ${q.depth}km deep</div>
+        </div>
+      </div>
+    `;
+  });
+
+  list.innerHTML = html;
+}
+
+function selectQuake(id, panTo = true){
+  selectedId = id;
+  const q = quakes.find(item => item.id === id);
+  if(!q) return;
+
+  document.querySelectorAll('.item').forEach(el => el.classList.remove('selected'));
+  const el = document.getElementById(`item-${id}`);
+  if(el){
+    el.classList.add('selected');
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  const marker = markersMap.get(id);
+  if(marker){
+    if(panTo) map.panTo([q.lat, q.lon]);
+    marker.openPopup();
+  }
+}
+
+async function fetchQuakes(){
+  document.getElementById('pulse-text').innerText = 'UPDATING USGS FEED';
+  try {
+    const res = await fetch(USGS_FEEDS[currentWindow]);
+    const data = await res.json();
+    
+    quakes = data.features.map(f => ({
+      id: f.id,
+      mag: f.properties.mag || 0,
+      place: f.properties.place || 'Unknown location',
+      time: f.properties.time,
+      lat: f.geometry.coordinates[1],
+      lon: f.geometry.coordinates[0],
+      depth: f.geometry.coordinates[2]
+    })).sort((a,b) => b.time - a.time);
+
+    if(!firstLoad && soundEnabled){
+      quakes.forEach(q => {
+        if(!seenIds.has(q.id) && q.mag >= ALERT_THRESHOLD){
+          playAlertTone(q.mag);
+        }
+      });
+    }
+
+    quakes.forEach(q => seenIds.add(q.id));
+    firstLoad = false;
+    
+    document.getElementById('pulse-text').innerText = 'LIVE FEED ACTIVE';
+    render();
+  } catch(e) {
+    console.error(e);
+    document.getElementById('pulse-text').innerText = 'FEED DISCONNECTED';
+  }
+}
+
+function bindSegment(id, callback) {
+  const container = document.getElementById(id);
+  container.addEventListener('click', (e) => {
+    if(e.target.tagName === 'BUTTON') {
+      container.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      callback(e.target);
+    }
+  });
+}
+
+bindSegment('window-seg', (btn) => {
+  currentWindow = btn.dataset.v;
+  fetchQuakes();
+});
+
+bindSegment('mag-seg', (btn) => {
+  currentMinMag = parseFloat(btn.dataset.v);
+  render();
+});
+
+document.getElementById('region-seg').addEventListener('click', (e) => {
+  if(e.target.tagName === 'BUTTON'){
+    const lat = parseFloat(e.target.dataset.lat);
+    const lon = parseFloat(e.target.dataset.lon);
+    const zoom = parseInt(e.target.dataset.zoom);
+    map.flyTo([lat, lon], zoom);
+  }
+});
+
+fetchQuakes();
+setInterval(fetchQuakes, 60000);
+</script>
+</body>
+</html>
+
